@@ -38,9 +38,17 @@ app = FastAPI(title="serving-stack", version="wk2")
 
 # Load once at import time. CPU only this week.
 print(f"loading {MODEL_ID} on cpu ...")
+if torch.cuda.is_available():
+    DEVICE = "cuda"
+    DTYPE = torch.float16
+else:
+    DEVICE = "cpu"
+    DTYPE = torch.float32
+
+print(f"loading {MODEL_ID} on {DEVICE} ...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=torch.float32)
-model.to("cpu")
+model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=DTYPE)
+model.to(DEVICE)
 model.eval()
 print("model ready")
 
