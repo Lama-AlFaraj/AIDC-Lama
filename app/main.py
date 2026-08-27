@@ -18,7 +18,7 @@ import time
 import uuid
 
 import torch
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Depends
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from schemas import (
@@ -33,8 +33,20 @@ from schemas import (
 )
 
 MODEL_ID = os.environ.get("MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")
+API_KEY = os.environ.get("API_KEY", "")
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "256"))
+
+if not API_KEY:
+    print("WARNING: API_KEY is not set — service is running UNAUTHENTICATED")
 
 app = FastAPI(title="serving-stack", version="wk2")
+
+
+def check_auth(authorization: str = Header(default="")) -> None:
+    """Require Bearer <API_KEY> on /v1/*. Open if API_KEY is unset (see warning above)."""
+    if API_KEY:
+        if authorization != f"Bearer {API_KEY}":
+            raise HTTPException(status_code=401, detail="Unauthorized")
 
 # Load once at import time. CPU only this week.
 print(f"loading {MODEL_ID} on cpu ...")
@@ -71,7 +83,7 @@ def health() -> HealthResponse:
 # GET /v1/models  -- TODO
 # ---------------------------------------------------------------------------
 @app.get("/v1/models", response_model=ModelList)
-def list_models() -> ModelList:
+def list_models(_: None = Depends(check_auth)) -> ModelList:
     """List the served model id(s).
 
     Contract (OpenAI-compatible):
@@ -91,7 +103,7 @@ def list_models() -> ModelList:
 # POST /v1/chat/completions  -- TODO (non-streaming first)
 # ---------------------------------------------------------------------------
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
-def chat_completions(req: ChatCompletionRequest) -> ChatCompletionResponse:
+def chat_completions(req: ChatCompletionRequest, _: None = Depends(check_auth)) -> ChatCompletionResponse:
     """Run the model over the messages and return an OpenAI-compatible completion.
 
     Contract (non-streaming, the week-2 target):
@@ -125,7 +137,8 @@ def chat_completions(req: ChatCompletionRequest) -> ChatCompletionResponse:
     Generation blocks the event loop this week. That is acceptable: week 3's
     engine owns concurrency. Name it, do not solve it here.
     """
-    input_ids = tokenizer.apply_chat_template(
+   req.max_tokens = min(req.max_tokens, MAX_TOKENS)
+      input_ids = tokenizer.apply_chat_template(
         [m.model_dump() for m in req.messages],
         add_generation_prompt=True,
         return_tensors="pt",
